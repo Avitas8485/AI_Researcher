@@ -1,0 +1,8 @@
+selenium
+llama-cpp-python
+transformers
+langchain
+beautifulsoup4
+duckduckgo-search
+chromadb
+pathvalidate
