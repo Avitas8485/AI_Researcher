@@ -6,3 +6,6 @@ beautifulsoup4
 duckduckgo-search
 chromadb
 pathvalidate
+pydantic
+docstring-parser
+requests

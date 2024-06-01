@@ -115,18 +115,16 @@ class ResearchAgent:
     
     def beautify_report(self, report: ResearchReport) -> str:
         return (
-            "Research Report\n"
-            f"Title: {report.title}\n"
-            f"Original Question: {report.original_question}\n"
-            f"Queries: {', '.join(report.queries)}\n"
-            f"Executive Summary: {report.executive_summary}\n"
-            "Introduction:\n"
-            f"{report.introduction.title}\n"
-            f"{report.introduction.content}\n"
-            "Main Body:\n"
-            + "\n".join(f"{section.title}\n{section.content}" for section in report.main_body) + "\n"
-            f"Conclusion: {report.conclusion}\n"
-            f"References: {report.references}\n"
+            f"Report on '{report.original_question}'\n\n"
+            f"{report.title}\n\n"
+            f"Queries: {', '.join(report.queries)}\n\n"
+            f"{report.executive_summary}\n\n"
+            f"{report.introduction.title}\n\n"
+            f"{report.introduction.content}\n\n"
+            + "\n\n".join(f"{section.title}\n\n{section.content}" for section in report.main_body) + "\n\n"
+            f"{report.conclusion.title}\n\n{report.conclusion.content}\n\n"
+            f"References:\n\n"
+            + "\n\n".join(f"{reference.title}\n{reference.url}" for reference in report.references)
     )
 
     def process_web_search(self, question: str):
