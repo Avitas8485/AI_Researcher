@@ -1,5 +1,5 @@
 from duckduckgo_search import DDGS
-from typing import Generator, Dict
+from typing import List, Dict
 from research_terminal.logger.logger import logger
 
 
@@ -12,7 +12,7 @@ class Duckduckgo:
         self.query = query
         logger.info(f"Duckduckgo initialized with query: {query}")
 
-    def search(self, max_results=5)-> Generator[Dict[str, str | None], None, None]:
+    def search(self, max_results=5)-> List[Dict]:
         """
         Performs the search
         :param query:
