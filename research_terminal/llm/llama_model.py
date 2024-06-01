@@ -2,11 +2,15 @@ from llama_cpp import Llama
 from research_terminal.llm.base_llm_model import BaseLLMModel
 
 from research_terminal.logger.logger import logger
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 
 class LlamaModel(BaseLLMModel):
     def __init__(self):
-        self.model_path = 'C:/Users/avity/Projects/models/llm/stablelm-zephyr-3b.Q4_K_M.gguf'
+        self.model_path = os.getenv("LLAMA_MODEL_PATH", "llama")
         self.llm = self.load_model()
         self.system_prompt = "You are an AI assistant. You are helping a user with a task."
         logger.debug("LlamaModel initialized")
