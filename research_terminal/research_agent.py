@@ -1,10 +1,14 @@
 from research_terminal.llm.llama_model import LlamaModel
-from research_terminal.llm.prompts import generate_search_queries_prompt, check_relevance_prompt, answer_question_prompt, research_report_prompt
-from research_terminal.llm.llm_parser import queries_to_list, zero_shot_answer
+from research_terminal.llm.prompts import generate_search_queries_prompt,  answer_question_prompt, research_report_prompt, generate_report_prompt
+from research_terminal.llm.llm_parser import check_relevance
 import json
+from research_terminal.llm.grammar.pydantic_models import Summary
 from research_terminal.scraping.web_search import Duckduckgo
 from research_terminal.scraping.web_scrape import WebScraper
 from research_terminal.scraping.processing.text import summarize_text, write_to_file
+from research_terminal.llm.grammar.pydantic_models_to_grammar import generate_gbnf_grammar_and_documentation
+from llama_cpp.llama_grammar import LlamaGrammar
+from research_terminal.llm.grammar.pydantic_models import SearchQueries, ResearchReport
 from pathvalidate import sanitize_filename
 import os
 from research_terminal.vector_db.chroma import ChromaDBClient
@@ -16,15 +20,29 @@ class ResearchAgent:
         self.model = LlamaModel()
         self.db = ChromaDBClient()
         self.visited_urls = set()
-
         
-    def create_search_queries(self, question: str)-> List[str]:
-        logger.info(f"Creating search queries for question: {question}")
-        prompts = generate_search_queries_prompt(question)
-        results = self.model.chat_completion(prompts)
-        results = queries_to_list(results)
-        results = json.dumps(results)
-        return json.loads(results)
+
+    
+    def generate_search_queries(self, question: str, num_queries: int = 3) -> SearchQueries:
+        """Generates the search queries for the given question.
+        Args:
+            question (str): The question to generate the search queries for
+        Returns:
+            SearchQueries: The search queries for the given question
+            """
+        search_query_prompt = generate_search_queries_prompt(question, num_queries)
+        gbnf_grammar, documentation = generate_gbnf_grammar_and_documentation([SearchQueries])
+        gbnf_grammar = LlamaGrammar.from_string(gbnf_grammar)
+        search_query_system_message = """You are an advanced AI research assistant, tasked with creating search queries in JSON format to find information on a given prompt. The following is the expected output:\n\n""" + documentation
+
+        search_queries = self.model.chat_completion(
+            user_prompt=search_query_prompt, system_prompt=search_query_system_message,
+            grammar=gbnf_grammar, max_tokens=1024
+        )
+
+        search_queries = json.loads(search_queries) #type: ignore
+        return SearchQueries(**search_queries)
+    
     
     def search_web(self, query: str, max_links: int=1)-> List[str]:
         ddg = Duckduckgo(query)
@@ -40,42 +58,84 @@ class ResearchAgent:
         scraper = WebScraper('firefox')
         text = scraper.scrape(url)
         summary = summarize_text(question, text)
+        self.visited_urls.add(url)
         scraper.quit()
-        return f"Information from {url}:\n\n{summary}\n\nHyperlinks:\n"
+        return f"""
+    Article Summary:
+        Title: {summary.title}
+        Source: {url}
+        Question: {summary.question}
+        Main Ideas: {summary.main_ides}
+        Chunk Summaries: 
+        {self.beautify_chunk_summaries(summary.chunk_summaries)}
+            
+        Strengths: {summary.strengths}
+        Weaknesses: {summary.weaknesses}
+        Conclusion: {summary.conclusion}
+    
+    """
+    # chunk summaries is a list of Summary objects
+    def beautify_chunk_summaries(self, chunk_summaries: List[Summary])-> str:
+        return '\n'.join(f"Question: {summary.question}\nSummary: {summary.summary}\nRelevance: {summary.relevance}" for summary in chunk_summaries)
+    
     
     def query_db(self, question: str):
         results = self.db.query_text(question)
         # if the documents returned in the form of [[]], then no results were found
         if results['documents'] == [[]]:
             return None
-        return json.dumps(results)
+        return json.dumps(results['documents'])
     
-    def check_relevance(self, question: str, text: str)-> str:
-        prompt = check_relevance_prompt(question, text)
-        result = self.model.chat_completion(prompt)
-        relevance = zero_shot_answer(result)
-        return relevance
+    
+        
     
     def process_db_results(self, question: str, db_results: str):
         logger.info(f"Checking relevance of database results for question: {question}")
-        relevance = self.check_relevance(question, db_results)
-        if relevance == "confirmation":
+        relevance = check_relevance(question, db_results)
+        if relevance.relevance == 'yes':
             logger.info(f"Database results are relevant for question: {question}")
             prompt = answer_question_prompt(question, db_results)
-            result = self.model.chat_completion(prompt)
+            result = self.model.chat_completion(system_prompt=self.model.system_prompt, user_prompt=prompt)
             return result
         else:
             logger.info(f"Database results not relevant for question: {question}")
             return None
-     
+    def generate_report(self, queries: List[str], research_info: str)-> ResearchReport:
+        logger.info(f"Generating research report")
+        report_prompt = research_report_prompt(queries, research_info)
+        gbnf_grammar, documentation = generate_gbnf_grammar_and_documentation([ResearchReport])
+        gbnf_grammar = LlamaGrammar.from_string(gbnf_grammar)
+        report_system_message = generate_report_prompt(documentation=documentation)
+        report = self.model.chat_completion(
+            user_prompt=report_prompt, system_prompt=report_system_message,
+            grammar=gbnf_grammar, max_tokens=4096, temperature=1.31, top_p=0.14, top_k=49, repeat_penalty=1.17
+        )
+        report = json.loads(report)
+        return ResearchReport(**report)
+    
+    def beautify_report(self, report: ResearchReport) -> str:
+        return (
+            "Research Report\n"
+            f"Title: {report.title}\n"
+            f"Original Question: {report.original_question}\n"
+            f"Queries: {', '.join(report.queries)}\n"
+            f"Executive Summary: {report.executive_summary}\n"
+            "Introduction:\n"
+            f"{report.introduction.title}\n"
+            f"{report.introduction.content}\n"
+            "Main Body:\n"
+            + "\n".join(f"{section.title}\n{section.content}" for section in report.main_body) + "\n"
+            f"Conclusion: {report.conclusion}\n"
+            f"References: {report.references}\n"
+    )
+
     def process_web_search(self, question: str):
         logger.info(f"Searching the web for question: {question}")
-        queries = self.create_search_queries(question)
-        search_results = [self.search_web(query) for query in queries]
+        search_results = [self.search_web(question, 3)]
         logger.debug(f"Search completed for question: {question} saving results...")
         research_info = '\n\n'.join(result for search_result in search_results for result in search_result)     
-        research_report = research_report_prompt(queries, research_info)
-        result = self.model.chat_completion(research_report)
+        result = self.generate_report([question], research_info)
+        result = self.beautify_report(result)
         logger.debug(f"Presenting research information for question: {question}")
         print(result)
         os.makedirs('./results', exist_ok=True)
@@ -95,8 +155,5 @@ class ResearchAgent:
                 return result
         return self.process_web_search(question)
 
-
-if __name__ == "__main__":
-    agent = ResearchAgent()
-    question = "What is the Pomodoro Technique?"
-    agent.run_agent(question)
+    
+    
