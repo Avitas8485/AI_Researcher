@@ -23,7 +23,3 @@ class Duckduckgo:
         ddgs_gen = self.ddg.text(self.query, region='wt-wt', max_results=max_results)
         return ddgs_gen
     
-if __name__ == '__main__':
-    ddg = Duckduckgo("pomodoro technique")
-    for result in ddg.search():
-        print(result)
